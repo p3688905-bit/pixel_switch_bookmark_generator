@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>像素風格書籤產生器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <!-- html2pdf for PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- dom-to-image for PNG export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            /* 淡淡的像素風格背景 */
+            background-color: #f0fdfa; /* 極淡的薄荷綠 */
+            background-image: 
+                linear-gradient(#ccfbf1 2px, transparent 2px),
+                linear-gradient(90deg, #ccfbf1 2px, transparent 2px);
+            background-size: 30px 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            color: #fff;
+        }
+
+        /* --- 暫存佈告欄 (背景畫布) --- */
+        #pinned-board {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1; /* 位於背景之上，主機之下 */
+            overflow: hidden;
+        }
+
+        .pinned-bookmark {
+            position: absolute;
+            cursor: grab;
+            user-select: none;
+            box-shadow: 2px 5px 15px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+            transform-origin: center;
+            /* 縮小顯示，看起來像貼在背景 */
+            width: 110px; /* 原本 220 的一半 */
+            border: 2px solid transparent;
+        }
+
+        .pinned-bookmark:active {
+            cursor: grabbing;
+        }
+
+        .pinned-bookmark.selected {
+            border: 2px dashed #ff0000;
+            box-shadow: 0 0 15px rgba(255, 0, 0, 0.5), 2px 5px 15px rgba(0,0,0,0.3);
+            filter: brightness(1.1);
+        }
+
+        /* --- 立體 Joy-Con 設計 --- */
+        .joycon {
+            width: 120px;
+            height: 480px;
+            position: relative;
+            box-shadow: 
+                inset 10px 0 20px rgba(255,255,255,0.2),
+                inset -10px 0 20px rgba(0,0,0,0.3),
+                10px 20px 30px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        .joycon-left {
+            background: linear-gradient(to right, #ff4c4c, #e60012, #cc0010);
+            border-radius: 60px 0 0 60px;
+            border: 2px solid #b3000c;
+            border-right: none;
+        }
+
+        .joycon-right {
+            background: linear-gradient(to right, #00d2ff, #00c3e3, #00a0b8);
+            border-radius: 0 60px 60px 0;
+            border: 2px solid #00879c;
+            border-left: none;
+        }
+
+        /* --- 搖桿與按鈕 --- */
+        .stick {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #4a4a4a, #2a2a2a);
+            border-radius: 50%;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            box-shadow: 0 6px 10px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.2);
+            border: 2px solid #1a1a1a;
+        }
+        .stick::after {
+            content: '';
+            width: 38px;
+            height: 38px;
+            background: radial-gradient(circle at 30% 30%, #5a5a5a, #222);
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: inset 0 -2px 4px rgba(0,0,0,0.4);
+        }
+
+        .btn-group {
+            position: absolute;
+            width: 70px;
+            height: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .btn-round {
+            width: 22px;
+            height: 22px;
+            background: #2a2a2a;
+            border-radius: 50%;
+            position: absolute;
+            color: #ccc;
+            font-size: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 3px 5px rgba(0,0,0,0.6), inset 0 1px 2px rgba(255,255,255,0.2);
+            border: 1px solid #111;
+            cursor: pointer;
+            font-family: 'Press Start 2P', cursive;
+            user-select: none;
+            z-index: 15;
+        }
+        .btn-round:active, .btn-round.active-effect {
+            transform: translateY(2px) !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.6), inset 0 2px 4px rgba(0,0,0,0.4) !important;
+        }
+
+        .btn-top { top: 0; left: 50%; transform: translateX(-50%); }
+        .btn-bottom { bottom: 0; left: 50%; transform: translateX(-50%); }
+        .btn-left { left: 0; top: 50%; transform: translateY(-50%); }
+        .btn-right { right: 0; top: 50%; transform: translateY(-50%); }
+
+        .btn-minus, .btn-plus {
+            width: 16px; height: 6px; background: #2a2a2a; position: absolute; top: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); cursor: pointer; z-index: 15;
+        }
+        .btn-minus:active, .btn-minus.active-effect, .btn-plus:active, .btn-plus.active-effect {
+            transform: translateY(2px); box-shadow: 0 1px 2px rgba(0,0,0,0.6);
+        }
+        .btn-plus::after {
+            content: ''; width: 6px; height: 16px; background: #2a2a2a; position: absolute; top: -5px; left: 5px;
+        }
+
+        /* --- 螢幕主體 --- */
+        .console-screen {
+            width: 700px;
+            height: 440px;
+            background: #000;
+            border-top: 4px solid #333;
+            border-bottom: 4px solid #111;
+            z-index: 10; /* 與手把同層級 */
+            padding: 15px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8), 0 20px 30px rgba(0,0,0,0.4);
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .screen-content {
+            width: 100%;
+            height: 100%;
+            background: #000;
+            border: 4px solid #fff;
+            display: flex;
+        }
+
+        /* --- 像素風元件 --- */
+        .pixel-input {
+            width: 100%;
+            background: transparent;
+            border: 2px solid #fff;
+            color: #fff;
+            padding: 8px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 10px;
+            outline: none;
+            text-transform: uppercase;
+        }
+        .pixel-input:focus { border-color: #ffeb3b; }
+        .pixel-label {
+            display: block; font-size: 10px; color: #ffeb3b; margin-bottom: 8px; text-shadow: 2px 2px 0 #000;
+        }
+
+        /* --- 書籤預覽本體 --- */
+        .bookmark-container {
+            width: 220px;
+            height: 380px;
+            background-color: #fff;
+            background-image: 
+                linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%, #eee), 
+                linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%, #eee);
+            background-size: 10px 10px;
+            background-position: 0 0, 5px 5px;
+            border: 4px solid #000;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        
+        /* 改用偽元素繪製紅色內框，避免匯出 PDF 時產生偏移與殘影 */
+        .bookmark-container::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border: 4px solid #ff5252;
+            pointer-events: none;
+            z-index: 5;
+        }
+        
+        .bookmark-hole {
+            width: 16px; height: 16px; background: #000; border: 2px solid #fff; position: absolute; top: 15px;
+        }
+        .exporting .bookmark-hole {
+            background: white !important; border: 2px solid #000;
+        }
+        .pixel-dialog {
+            background: #fff; border: 4px solid #000; padding: 10px; width: 100%; min-height: 80px; font-size: 10px; color: #000; line-height: 1.5; position: relative; word-break: break-all; box-shadow: 4px 4px 0px rgba(0,0,0,0.2);
+        }
+        .pixel-name-tag {
+            background: #000; color: #fff; padding: 5px 10px; border: 2px solid #fff; font-size: 10px; margin-top: 10px; box-shadow: 2px 2px 0px #ff5252;
+            max-width: 90%; word-break: break-all; text-align: center;
+        }
+        .pixel-image-frame {
+            width: 100px; height: 100px; border: 4px solid #000; background: #fff; margin-top: 30px; margin-bottom: 15px; overflow: hidden; box-shadow: 4px 4px 0px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center;
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #000; border-left: 2px solid #333; }
+        ::-webkit-scrollbar-thumb { background: #fff; }
+        input[type="file"]::file-selector-button { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- 暫存佈告欄 -->
+    <div id="pinned-board" onclick="deselectAll(event)"></div>
+
+    <div class="flex items-center transform scale-[0.8] md:scale-100 z-10 relative">
+        
+        <!-- 左 Joy-Con -->
+        <div class="joycon joycon-left">
+            <!-- 減號鍵：清空所有暫存 -->
+            <div id="btn-minus" class="btn-minus" style="right: 20px;" onclick="clearAllPinned()"></div>
+            <div class="stick" style="top: 80px;"></div>
+            <div class="btn-group" style="top: 200px;">
+                <div class="btn-round btn-top">▲</div>
+                <div class="btn-round btn-bottom">▼</div>
+                <div class="btn-round btn-left">◀</div>
+                <div class="btn-round btn-right">▶</div>
+            </div>
+            <div class="w-5 h-5 bg-gray-800 rounded-sm absolute bottom-24 right-8 shadow-[0_2px_4px_rgba(0,0,0,0.5)] border border-gray-900">
+                <div class="w-3 h-3 border border-gray-500 rounded-full mx-auto mt-[3px]"></div>
+            </div>
+        </div>
+
+        <!-- 螢幕區 -->
+        <div class="console-screen">
+            <div class="absolute top-0 right-0 w-1/3 h-full bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none z-10"></div>
+            
+            <div class="screen-content">
+                <!-- 左側：輸入表單 -->
+                <div class="w-1/2 p-6 border-r-4 border-white flex flex-col justify-center bg-[#111]">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="pixel-label">NAME_</label>
+                            <input type="text" id="input-name" class="pixel-input">
+                        </div>
+                        <div>
+                            <label class="pixel-label">MESSAGE_</label>
+                            <textarea id="input-message" rows="2" class="pixel-input resize-none"></textarea>
+                        </div>
+                        <div>
+                            <label class="pixel-label">IMAGE_</label>
+                            <div class="relative w-full h-10 border-2 border-white bg-transparent hover:bg-white/10 transition flex items-center justify-center cursor-pointer overflow-hidden text-white font-bold text-[10px]">
+                                <span id="file-name-display">SELECT FILE...</span>
+                                <input type="file" id="input-image" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 提示區 (更新排版以容納更多按鈕說明) -->
+                    <div class="mt-6 grid grid-cols-2 gap-2 text-[7px] text-gray-400">
+                        <div class="flex items-center">
+                            <span class="text-red-400 mr-2 border border-red-400 px-1 w-5 text-center">[A]</span> PDF
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-blue-400 mr-2 border border-blue-400 px-1 w-5 text-center">[X]</span> PNG
+                        </div>
+                        <div class="flex items-center text-yellow-400">
+                            <span class="mr-2 border border-yellow-400 px-1 w-5 text-center">[Y]</span> PIN
+                        </div>
+                        <div class="flex items-center">
+                            <span class="mr-2 border border-gray-400 px-1 w-5 text-center">[B]</span> DEL
+                        </div>
+                        <div class="flex items-center col-span-2 mt-1">
+                            <span class="mr-2 border border-gray-400 px-1 w-5 text-center">[-]</span> CLEAR ALL PINNED
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右側：書籤預覽 -->
+                <div class="w-1/2 bg-[#222] flex items-center justify-center relative shadow-[inset_10px_0_20px_rgba(0,0,0,0.5)]">
+                    <div id="bookmark-preview" class="bookmark-container">
+                        <div class="bookmark-hole"></div>
+                        <div class="pixel-image-frame z-10">
+                            <img id="preview-image" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='square' stroke-linejoin='miter'><rect x='3' y='3' width='18' height='18'></rect><circle cx='8.5' cy='8.5' r='1.5' fill='%23000'></circle><circle cx='15.5' cy='8.5' r='1.5' fill='%23000'></circle><path d='M8 15h8'></path></svg>" alt="IMG" class="w-full h-full object-cover">
+                        </div>
+                        <div class="w-full flex-grow flex flex-col items-center">
+                            <div class="pixel-dialog">
+                                <p id="preview-message" class="whitespace-pre-wrap"></p>
+                            </div>
+                        </div>
+                        <div class="mt-auto pb-2">
+                            <div class="pixel-name-tag" id="preview-name" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右 Joy-Con -->
+        <div class="joycon joycon-right">
+            <div class="btn-plus" style="left: 20px;"></div>
+            <div class="btn-group" style="top: 80px;">
+                <!-- X 鍵: 匯出 PNG -->
+                <div id="btn-x" class="btn-round btn-top text-blue-400" style="background:#111; border-color:#004;" onclick="generatePNG()">X</div>
+                <!-- B 鍵: 刪除選取的暫存 -->
+                <div id="btn-b" class="btn-round btn-bottom" onclick="deleteSelected()">B</div>
+                <!-- Y 鍵: 貼到背景 -->
+                <div id="btn-y" class="btn-round btn-left text-yellow-400 font-bold" style="background:#111; border-color:#440;" onclick="pinToBoard()">Y</div>
+                <!-- A 鍵: 匯出 PDF -->
+                <div id="btn-a" class="btn-round btn-right text-red-500 font-bold" style="background:#111; border-color:#500;" onclick="generatePDF()">A</div>
+            </div>
+            <div class="stick" style="top: 200px;"></div>
+            <div class="w-6 h-6 bg-gray-800 rounded-full absolute bottom-24 left-8 shadow-[0_2px_4px_rgba(0,0,0,0.5)] flex items-center justify-center border border-gray-900">
+                <div class="w-4 h-4 border-2 border-gray-600 rounded-full"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 處理中提示畫面 -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-[100]">
+        <div class="bg-black border-4 border-white px-8 py-6 flex flex-col items-center gap-4 shadow-[8px_8px_0_rgba(255,255,255,0.2)]">
+            <div class="text-white text-xs animate-pulse">PROCESSING...</div>
+        </div>
+    </div>
+
+    <script>
+        const inputName = document.getElementById('input-name');
+        const inputMessage = document.getElementById('input-message');
+        const inputImage = document.getElementById('input-image');
+        
+        const previewName = document.getElementById('preview-name');
+        const previewMessage = document.getElementById('preview-message');
+        const previewImage = document.getElementById('preview-image');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const pinnedBoard = document.getElementById('pinned-board');
+        
+        // Buttons
+        const btnA = document.getElementById('btn-a');
+        const btnX = document.getElementById('btn-x');
+        const btnY = document.getElementById('btn-y');
+        const btnB = document.getElementById('btn-b');
+        const btnMinus = document.getElementById('btn-minus');
+
+        let selectedPinnedItem = null;
+        let zIndexCounter = 20; // 確保新貼的會在最上面
+
+        // 更新顯示內容
+        function updateDisplay() {
+            previewName.textContent = inputName.value;
+            previewName.style.display = inputName.value.trim() ? 'block' : 'none';
+            previewMessage.innerHTML = inputMessage.value.replace(/\n/g, '<br>');
+        }
+
+        inputName.addEventListener('input', updateDisplay);
+        inputMessage.addEventListener('input', updateDisplay);
+
+        inputImage.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                fileNameDisplay.textContent = file.name.length > 10 ? file.name.substring(0, 10) + '...' : file.name;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImage.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 載入畫面控制
+        function startExporting() {
+            document.body.classList.add('exporting');
+            const overlay = document.getElementById('loading-overlay');
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+        }
+
+        function stopExporting() {
+            document.body.classList.remove('exporting');
+            const overlay = document.getElementById('loading-overlay');
+            overlay.classList.add('hidden');
+            overlay.classList.remove('flex');
+        }
+
+        // --- 匯出功能 (PDF / PNG) ---
+        function generatePDF() {
+            triggerBtnEffect(btnA);
+            startExporting();
+            const element = document.getElementById('bookmark-preview');
+            const opt = {
+                margin: 0,
+                filename: `Bookmark_${inputName.value || 'EXPORT'}.pdf`,
+                image: { type: 'jpeg', quality: 1 },
+                html2canvas: { scale: 3, useCORS: true, backgroundColor: '#ffffff' },
+                jsPDF: { unit: 'px', format: [220, 380], orientation: 'portrait' }
+            };
+            setTimeout(() => {
+                html2pdf().set(opt).from(element).save().then(stopExporting).catch(err => {
+                    alert('PDF ERROR_'); stopExporting();
+                });
+            }, 300);
+        }
+
+        function generatePNG() {
+            triggerBtnEffect(btnX);
+            startExporting();
+            const element = document.getElementById('bookmark-preview');
+            const filename = `Bookmark_${inputName.value || 'EXPORT'}.png`;
+            setTimeout(() => {
+                const scale = 3; 
+                domtoimage.toBlob(element, {
+                    width: element.clientWidth * scale,
+                    height: element.clientHeight * scale,
+                    style: {
+                        transform: 'scale('+scale+')', transformOrigin: 'top left',
+                        width: element.clientWidth + 'px', height: element.clientHeight + 'px'
+                    }
+                }).then(function (blob) {
+                    const link = document.createElement('a');
+                    link.download = filename;
+                    link.href = URL.createObjectURL(blob);
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                    stopExporting();
+                }).catch(function (error) {
+                    alert('PNG ERROR_'); stopExporting();
+                });
+            }, 300);
+        }
+
+        // --- 佈告欄功能 (Y / B / -) ---
+
+        // Y 鍵：釘選到背景
+        function pinToBoard() {
+            triggerBtnEffect(btnY);
+            startExporting(); // 借用匯出的 UI 隱藏書籤洞
+            const element = document.getElementById('bookmark-preview');
+            
+            setTimeout(() => {
+                // 將當前預覽轉為圖片貼到背景
+                domtoimage.toPng(element, {
+                    width: element.clientWidth,
+                    height: element.clientHeight,
+                    style: { transform: 'scale(1)', transformOrigin: 'top left' }
+                }).then(function (dataUrl) {
+                    const img = document.createElement('img');
+                    img.src = dataUrl;
+                    img.className = 'pinned-bookmark';
+                    
+                    // 隨機位置與角度
+                    const randomX = Math.random() * (window.innerWidth - 150);
+                    const randomY = Math.random() * (window.innerHeight - 200);
+                    const randomRotate = (Math.random() - 0.5) * 40; // -20 到 20 度
+                    
+                    img.style.left = `${randomX}px`;
+                    img.style.top = `${randomY}px`;
+                    img.style.transform = `rotate(${randomRotate}deg)`;
+                    img.style.zIndex = zIndexCounter++;
+                    img.dataset.rotate = randomRotate; // 記錄原始角度
+
+                    // 加入拖曳與選取功能
+                    makeDraggable(img);
+
+                    pinnedBoard.appendChild(img);
+                    stopExporting();
+                }).catch(function (error) {
+                    stopExporting();
+                });
+            }, 300);
+        }
+
+        // B 鍵：刪除選取的書籤
+        function deleteSelected() {
+            triggerBtnEffect(btnB);
+            if (selectedPinnedItem) {
+                selectedPinnedItem.remove();
+                selectedPinnedItem = null;
+            }
+        }
+
+        // - 鍵：清空全部
+        function clearAllPinned() {
+            triggerBtnEffect(btnMinus);
+            pinnedBoard.innerHTML = '';
+            selectedPinnedItem = null;
+        }
+
+        // 按鈕視覺回饋
+        function triggerBtnEffect(btn) {
+            btn.classList.add('active-effect');
+            setTimeout(() => btn.classList.remove('active-effect'), 150);
+        }
+
+        // 取消選取 (點擊背景空白處)
+        function deselectAll(e) {
+            if (e.target === pinnedBoard) {
+                if (selectedPinnedItem) {
+                    selectedPinnedItem.classList.remove('selected');
+                    selectedPinnedItem = null;
+                }
+            }
+        }
+
+        // --- 拖曳與選取邏輯 ---
+        function makeDraggable(el) {
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            
+            el.onmousedown = dragMouseDown;
+            el.ontouchstart = dragMouseDown;
+
+            function dragMouseDown(e) {
+                e.preventDefault(); // 防止拖曳圖片產生預設行為
+                
+                // 處理選取狀態
+                if (selectedPinnedItem && selectedPinnedItem !== el) {
+                    selectedPinnedItem.classList.remove('selected');
+                }
+                selectedPinnedItem = el;
+                el.classList.add('selected');
+                el.style.zIndex = zIndexCounter++; // 點擊時移到最上層
+
+                e = e || window.event;
+                pos3 = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+                pos4 = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+                
+                document.onmouseup = closeDragElement;
+                document.ontouchend = closeDragElement;
+                document.onmousemove = elementDrag;
+                document.ontouchmove = elementDrag;
+            }
+
+            function elementDrag(e) {
+                e = e || window.event;
+                e.preventDefault();
+                let clientX = e.clientX || (e.touches ? e.touches[0].clientX : pos3);
+                let clientY = e.clientY || (e.touches ? e.touches[0].clientY : pos4);
+                
+                pos1 = pos3 - clientX;
+                pos2 = pos4 - clientY;
+                pos3 = clientX;
+                pos4 = clientY;
+                
+                el.style.top = (el.offsetTop - pos2) + "px";
+                el.style.left = (el.offsetLeft - pos1) + "px";
+            }
+
+            function closeDragElement() {
+                document.onmouseup = null;
+                document.ontouchend = null;
+                document.onmousemove = null;
+                document.ontouchmove = null;
+            }
+        }
+    </script>
+</body>
+</html>
